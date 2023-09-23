@@ -17,6 +17,18 @@ export default class RideService {
     }
   }
 
+  private async getActiveRidesByDriver(driverId: string) {
+    const connection = pgp()("postgres://postgres:123456@localhost:5432/app");
+    try {
+      return connection.query(
+        "select * from cccat13.ride where driver_id=$1 and status in ($2, $3)",
+        [driverId, "accepted", "in_progress"]
+      );
+    } finally {
+      await connection.$pool.end();
+    }
+  }
+
   async getRide(rideId: string): Promise<any> {
     const connection = pgp()("postgres://postgres:123456@localhost:5432/app");
     try {
@@ -37,7 +49,7 @@ export default class RideService {
     const account = await this.accountService.getAccount(passengerId);
 
     if (!account.is_passenger) {
-      throw new Error("Account is not a passenger");
+      throw new Error("Not passenger account");
     }
 
     const activeRides = await this.getActiveRidesByPassenger(passengerId);
@@ -67,6 +79,35 @@ export default class RideService {
       );
 
       return { ride_id: rideId };
+    } finally {
+      await connection.$pool.end();
+    }
+  }
+
+  async acceptRide(driverId: string, rideId: string) {
+    const account = await this.accountService.getAccount(driverId);
+
+    if (!account.is_driver) {
+      throw new Error("Not driver account");
+    }
+
+    const ride = await this.getRide(rideId);
+    if (ride.status !== "requested") {
+      throw new Error("Ride cannot be accepted");
+    }
+
+    const activeRides = await this.getActiveRidesByDriver(driverId);
+    if (activeRides.length) {
+      throw new Error("Driver already has a ride in progress");
+    }
+
+    const connection = pgp()("postgres://postgres:123456@localhost:5432/app");
+
+    try {
+      await connection.query(
+        "update cccat13.ride set status=$1, driver_id=$2 where ride_id=$3",
+        ["accepted", driverId, rideId]
+      );
     } finally {
       await connection.$pool.end();
     }
